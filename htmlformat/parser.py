@@ -34,51 +34,46 @@ class Parser(HTMLParser):
         self.add_node('comment', data)
 
     def add_node(self, type, *data):
-        line, offset = self.getpos()
-        self._stack[-1].append((type, (line, offset + 1), *data))
+        line, column = self.getpos()
+        column += 1
+
+        if type != 'text':
+            self._stack[-1].append((type, (line, column), *data))
+            return
+
+        content, = data
+
+        parts = []
+        index = 0
+        for sep in re.finditer(r'[^\S\n]*\n[^\S\n]*', content):
+            parts.append((index, sep.start()))
+            index = sep.end()
+        parts.append((index, len(content)))
+
+        index = 0
+        for start, end in parts:
+            if start == end:
+                continue
+            for char in content[index:start]:
+                if char == '\n':
+                    line += 1
+                    column = 1
+                else:
+                    column += 1
+            index = start
+            self._stack[-1].append(
+                ('text', (line, column), content[start:end])
+            )
 
     def close_tags(self, index=0):
         while len(self._stack) - 1 > index:
-            children = self.clean_nodes(self._stack.pop())
+            children = tuple(self._stack.pop())
             self._stack[-1][-1] = (*self._stack[-1][-1][:-1], children)
-
-    def clean_nodes(self, nodes):
-        clean_nodes = []
-
-        for i, node in enumerate(nodes):
-            if node[0] == 'text':
-                _, (line, column), content = node
-
-                parts = []
-                index = 0
-                for sep in re.finditer(r'[^\S\n]*\n[^\S\n]*', content):
-                    parts.append((index, sep.start()))
-                    index = sep.end()
-                parts.append((index, len(content)))
-
-                index = 0
-                for start, end in parts:
-                    if start == end:
-                        continue
-                    for char in content[index:start]:
-                        if char == '\n':
-                            line += 1
-                            column = 1
-                        else:
-                            column += 1
-                    index = start
-                    clean_nodes.append(
-                        ('text', (line, column), content[start:end])
-                    )
-            else:
-                clean_nodes.append(node)
-
-        return tuple(clean_nodes)
 
     def get_nodes(self):
         self.close()
         self.close_tags()
-        return self.clean_nodes(self._stack[0])
+        return tuple(self._stack[0])
 
 
 def parse(content):
